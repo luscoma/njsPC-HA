@@ -16,6 +16,7 @@ from .features import CircuitSwitch
 from .chemistry import SuperChlorSwitch
 from .bodies import BodyCircuitSwitch
 from .schedules import ScheduleSwitch
+from .controller import PanelModeSwitch
 
 
 async def async_setup_entry(
@@ -28,6 +29,11 @@ async def async_setup_entry(
 
     new_devices = []
     config = coordinator.api.get_config()
+
+    # setPanelModeAsync is only implemented on NixieBoard; it's a no-op on
+    # EasyTouch/IntelliCenter, so only expose the switch for Nixie controllers.
+    if config.get("equipment", {}).get("controllerType") == "nixie":
+        new_devices.append(PanelModeSwitch(coordinator, config))
 
     for circuit in config["circuits"]:
         try:
