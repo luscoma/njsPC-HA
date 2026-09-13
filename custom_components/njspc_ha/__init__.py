@@ -11,10 +11,12 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform, CONF_HOST, CONF_PORT, EVENT_HOMEASSISTANT_STOP
-from homeassistant.core import HomeAssistant, Event, ServiceCall
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.core import HomeAssistant, Event, ServiceCall, callback
+from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.typing import ConfigType
+import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.helpers import aiohttp_client
 
@@ -67,6 +69,8 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
 SET_SERVICE_MODE_SCHEMA = vol.Schema(
     {
         # Minutes; 0 means indefinite service mode. njsPC's REST timeout is in seconds.
@@ -77,55 +81,53 @@ SET_SERVICE_MODE_SCHEMA = vol.Schema(
 )
 
 
-async def _async_set_panel_mode_on_nixie_controllers(hass: HomeAssistant, data: dict) -> None:
+async def _async_set_panel_mode(hass: HomeAssistant, data: dict) -> None:
     """Send a panel mode command to every loaded Nixie controller."""
-    matched = False
-    for coordinator in hass.data.get(DOMAIN, {}).values():
-        config = coordinator.api.get_config()
-        if config and config.get("equipment", {}).get("controllerType") == "nixie":
-            matched = True
-            await coordinator.api.command(url=API_PANEL_MODE, data=data)
-        else:
-            _LOGGER.debug(
-                "Skipping panel mode service call for non-Nixie controller %s",
-                coordinator.controller_id,
-            )
-    if not matched:
-        _LOGGER.warning("No Nixie controllers loaded, panel mode service call ignored")
+    # Copy: an entry unload can mutate hass.data[DOMAIN] while we await.
+    coordinators = [
+        coordinator
+        for coordinator in list(hass.data.get(DOMAIN, {}).values())
+        if (coordinator.api.get_config() or {}).get("controllerType") == "nixie"
+    ]
+    if not coordinators:
+        raise ServiceValidationError(
+            "Panel mode is only supported on Nixie controllers and none are loaded"
+        )
+    for coordinator in coordinators:
+        await coordinator.api.command(url=API_PANEL_MODE, data=data)
 
 
-def _async_register_services(hass: HomeAssistant) -> None:
-    """Register the njspc_ha domain services, once."""
-    if hass.services.has_service(DOMAIN, SERVICE_SET_SERVICE_MODE):
-        return
+@callback
+def _register_services(hass: HomeAssistant) -> None:
+    """Register the njspc_ha domain services."""
 
-    async def _async_handle_set_service_mode(call: ServiceCall) -> None:
+    async def _handle_set_service_mode(call: ServiceCall) -> None:
         setting = call.data[ATTR_SETTING]
         if setting > 0:
             data = {"mode": PANEL_MODE_TIMEOUT, "timeout": setting * 60}
         else:
             data = {"mode": PANEL_MODE_SERVICE}
-        await _async_set_panel_mode_on_nixie_controllers(hass, data)
+        await _async_set_panel_mode(hass, data)
 
-    async def _async_handle_set_auto_mode(call: ServiceCall) -> None:
+    async def _handle_set_auto_mode(_call: ServiceCall) -> None:
         data = {"mode": PANEL_MODE_AUTO, "resumeSchedules": True}
-        await _async_set_panel_mode_on_nixie_controllers(hass, data)
+        await _async_set_panel_mode(hass, data)
 
     hass.services.async_register(
         DOMAIN,
         SERVICE_SET_SERVICE_MODE,
-        _async_handle_set_service_mode,
+        _handle_set_service_mode,
         schema=SET_SERVICE_MODE_SCHEMA,
     )
     hass.services.async_register(
-        DOMAIN, SERVICE_SET_AUTO_MODE, _async_handle_set_auto_mode
+        DOMAIN, SERVICE_SET_AUTO_MODE, _handle_set_auto_mode
     )
 
 
-def _async_unregister_services(hass: HomeAssistant) -> None:
-    """Remove the njspc_ha domain services."""
-    hass.services.async_remove(DOMAIN, SERVICE_SET_SERVICE_MODE)
-    hass.services.async_remove(DOMAIN, SERVICE_SET_AUTO_MODE)
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Set up the njsPC-HA integration (domain services live here)."""
+    _register_services(hass)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -154,7 +156,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator.start_reconnect_loop()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
-    _async_register_services(hass)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -172,8 +173,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         coordinator = hass.data[DOMAIN].pop(entry.entry_id)
         await coordinator.sio_close()
-        if not hass.data[DOMAIN]:
-            _async_unregister_services(hass)
 
     return unload_ok
 

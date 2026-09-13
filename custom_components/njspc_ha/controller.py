@@ -30,6 +30,7 @@ from .const import (
     API_PANEL_MODE,
     PANEL_MODE_AUTO,
     PANEL_MODE_SERVICE,
+    PANEL_MODE_TIMEOUT,
 )
 
 
@@ -168,11 +169,9 @@ class PanelModeSensor(PoolEquipmentEntity, SensorEntity):
 class PanelModeSwitch(PoolEquipmentEntity, SwitchEntity):
     """Switch to view/set the njsPC panel mode (Nixie controllers only).
 
-    Nixie panelMode values: 0=auto, 1=service, 128=timeout, 255=error.
-    The switch is considered "on" while the panel is in service mode or
-    in a timed timeout (1 or 128), and "off" while in auto (0). State is
-    driven entirely by the pushed `controller` socket event - there is
-    no optimistic update on command.
+    The switch is "on" while the panel mode is `service` or `timeout` and
+    "off" while it is `auto`. State is driven entirely by the pushed
+    `controller` socket event - there is no optimistic update on command.
     """
 
     def __init__(
@@ -181,23 +180,22 @@ class PanelModeSwitch(PoolEquipmentEntity, SwitchEntity):
         """Initialize the switch."""
         super().__init__(coordinator=coordinator, equipment_class=PoolEquipmentClass.CONTROL_PANEL, data=data)
         self._attr_entity_category = EntityCategory.CONFIG
-        self._mode = None
-        if "mode" in data:
-            self._mode = data["mode"]["val"]
-            self._available = True
-        else:
-            self._mode = None
-            self._available = False
+        self._mode = self._mode_name(data)
+        self._available = self._mode is not None
+
+    @staticmethod
+    def _mode_name(data: Any) -> str | None:
+        """Extract the panel mode name from a controller payload, if present."""
+        mode = data.get("mode")
+        if isinstance(mode, dict):
+            return mode.get("name")
+        return None
 
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
         if self.coordinator.data["event"] == EVENT_CONTROLLER:
-            if "mode" in self.coordinator.data:
-                self._mode = self.coordinator.data["mode"]["val"]
-                self._available = True
-            else:
-                self._mode = None
-                self._available = False
+            self._mode = self._mode_name(self.coordinator.data)
+            self._available = self._mode is not None
             self.async_write_ha_state()
         elif self.coordinator.data["event"] == EVENT_AVAILABILITY:
             self._available = self.coordinator.data["available"]
@@ -234,7 +232,7 @@ class PanelModeSwitch(PoolEquipmentEntity, SwitchEntity):
     @property
     def is_on(self) -> bool:
         """Return True while the panel is in service mode or a timeout."""
-        return self._mode in (1, 128)
+        return self._mode in (PANEL_MODE_SERVICE, PANEL_MODE_TIMEOUT)
 
     @property
     def icon(self) -> str:

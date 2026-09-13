@@ -1,6 +1,6 @@
 set_service_mode:
   name: Service Mode
-  description: Sets the panel to service mode. Only applicable for Nixie controllers.
+  description: Sets the panel to service mode on every configured njsPC instance. Only applicable for Nixie controllers.
   fields:
     setting:
       name: Timeout
@@ -12,7 +12,8 @@ set_service_mode:
             min: 0
             max: 59940
             unit_of_measurement: minutes
+            mode: box
 
 set_auto_mode:
   name: Auto Mode
-  description: Returns the panel to auto mode and resumes schedules. Only applicable for Nixie controllers.
+  description: Returns the panel to auto mode and resumes schedules on every configured njsPC instance. Only applicable for Nixie controllers.
