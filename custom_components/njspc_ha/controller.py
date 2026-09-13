@@ -15,6 +15,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
     SensorDeviceClass
 )
+from homeassistant.components.switch import SwitchEntity
 from homeassistant.const import UnitOfTemperature
 from .entity import PoolEquipmentEntity
 from .__init__ import NjsPCHAdata
@@ -25,7 +26,10 @@ from .const import (
     EVENT_CONTROLLER,
     EVENT_TEMPS,
     STATUS,
-    DESC
+    DESC,
+    API_PANEL_MODE,
+    PANEL_MODE_AUTO,
+    PANEL_MODE_SERVICE,
 )
 
 
@@ -160,6 +164,83 @@ class PanelModeSensor(PoolEquipmentEntity, SensorEntity):
                 return "mdi:mdi-lock"
             case _:
                 return "mdi:lock-alert"
+
+class PanelModeSwitch(PoolEquipmentEntity, SwitchEntity):
+    """Switch to view/set the njsPC panel mode (Nixie controllers only).
+
+    Nixie panelMode values: 0=auto, 1=service, 128=timeout, 255=error.
+    The switch is considered "on" while the panel is in service mode or
+    in a timed timeout (1 or 128), and "off" while in auto (0). State is
+    driven entirely by the pushed `controller` socket event - there is
+    no optimistic update on command.
+    """
+
+    def __init__(
+        self, coordinator: NjsPCHAdata, data: Any
+    ) -> None:
+        """Initialize the switch."""
+        super().__init__(coordinator=coordinator, equipment_class=PoolEquipmentClass.CONTROL_PANEL, data=data)
+        self._attr_entity_category = EntityCategory.CONFIG
+        self._mode = None
+        if "mode" in data:
+            self._mode = data["mode"]["val"]
+            self._available = True
+        else:
+            self._mode = None
+            self._available = False
+
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        if self.coordinator.data["event"] == EVENT_CONTROLLER:
+            if "mode" in self.coordinator.data:
+                self._mode = self.coordinator.data["mode"]["val"]
+                self._available = True
+            else:
+                self._mode = None
+                self._available = False
+            self.async_write_ha_state()
+        elif self.coordinator.data["event"] == EVENT_AVAILABILITY:
+            self._available = self.coordinator.data["available"]
+            self.async_write_ha_state()
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Put the panel into (indefinite) service mode."""
+        data = {"mode": PANEL_MODE_SERVICE}
+        await self.coordinator.api.command(url=API_PANEL_MODE, data=data)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Return the panel to auto mode, resuming schedules."""
+        data = {"mode": PANEL_MODE_AUTO, "resumeSchedules": True}
+        await self.coordinator.api.command(url=API_PANEL_MODE, data=data)
+
+    @property
+    def should_poll(self) -> bool:
+        return False
+
+    @property
+    def available(self) -> bool:
+        return self._available
+
+    @property
+    def name(self) -> str | None:
+        """Name of the switch"""
+        return "Service Mode"
+
+    @property
+    def unique_id(self) -> str | None:
+        """ID of the switch"""
+        return f"{self.coordinator.controller_id}_{self.equipment_class}_service_mode"
+
+    @property
+    def is_on(self) -> bool:
+        """Return True while the panel is in service mode or a timeout."""
+        return self._mode in (1, 128)
+
+    @property
+    def icon(self) -> str:
+        if self.is_on:
+            return "mdi:wrench"
+        return "mdi:wrench-outline"
 
 class TempProbeSensor(PoolEquipmentEntity, SensorEntity):
     """Temp Sensor for njsPC-HA"""
