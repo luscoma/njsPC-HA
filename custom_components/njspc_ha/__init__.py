@@ -16,9 +16,8 @@ from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.typing import ConfigType
-import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
-from homeassistant.helpers import aiohttp_client
+from homeassistant.helpers import aiohttp_client, config_validation as cv
 
 
 PLATFORMS: list[Platform] = [
@@ -86,7 +85,7 @@ async def _async_set_panel_mode(hass: HomeAssistant, data: dict) -> None:
     # Copy: an entry unload can mutate hass.data[DOMAIN] while we await.
     coordinators = [
         coordinator
-        for coordinator in list(hass.data.get(DOMAIN, {}).values())
+        for coordinator in hass.data.get(DOMAIN, {}).values()
         if (coordinator.api.get_config() or {}).get("controllerType") == "nixie"
     ]
     if not coordinators:
