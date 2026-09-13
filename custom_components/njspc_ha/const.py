@@ -28,6 +28,7 @@ API_TEMPERATURE_SETPOINT = "state/body/setPoint"
 API_SET_HEATMODE = "state/body/heatMode"
 API_CHEM_CONTROLLER_SETPOINT = "state/chemController"
 API_CONFIG_SCHEDULE = "config/schedule"
+API_PANEL_MODE = "state/panelMode"
 
 # SOCKETIO EVENTS
 EVENT_CIRCUIT = "circuit"
@@ -68,6 +69,16 @@ SUPER_CHLOR = "superChlor"
 SUPER_CHLOR_HOURS = "superChlorHours"
 MIN_FLOW = "minFlow"
 MAX_FLOW = "maxFlow"
+
+# SERVICES
+SERVICE_SET_SERVICE_MODE = "set_service_mode"
+SERVICE_SET_AUTO_MODE = "set_auto_mode"
+ATTR_SETTING = "setting"
+
+# PANEL MODES (Nixie)
+PANEL_MODE_AUTO = "auto"
+PANEL_MODE_SERVICE = "service"
+PANEL_MODE_TIMEOUT = "timeout"
 
 
 class PoolEquipmentClass(enum.StrEnum):
